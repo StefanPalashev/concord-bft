@@ -488,7 +488,8 @@ class BcStTest : public ::testing::Test {
 
   // Target/Product ST - Convenience common code
   template <class R, class... Args>
-  void getMissingblocksStage(std::function<R(Args...)> f1 = EMPTY_FUNC, std::function<R(Args...)> f2 = EMPTY_FUNC);
+  void getMissingblocksStage(std::function<R(Args...)> callAtStart = EMPTY_FUNC,
+                             std::function<R(Args...)> callAtEnd = EMPTY_FUNC);
   void getReservedPagesStage();
 
  public:  // quick workaround to allow binding on derived class
@@ -1203,10 +1204,10 @@ void BcStTest::dstRestart(std::set<size_t>& execOnIterations) {
 }
 
 template <class R, class... Args>
-void BcStTest::getMissingblocksStage(std::function<R(Args...)> f1, std::function<R(Args...)> f2) {
+void BcStTest::getMissingblocksStage(std::function<R(Args...)> callAtStart, std::function<R(Args...)> callAtEnd) {
   testState_.nextRequiredBlock = stDelegator_->getNextRequiredBlock();
   while (true) {
-    if (f1) f1();
+    if (callAtStart) callAtStart();
     ASSERT_NFF(fakeSrcReplica_->replyFetchBlocksMsg());
     // There might be pending jobs for putBlock, we need to wait some time and then finalize them by calling
     this_thread::sleep_for(chrono::milliseconds(20));
@@ -1217,7 +1218,7 @@ void BcStTest::getMissingblocksStage(std::function<R(Args...)> f1, std::function
     }
     testState_.minRequiredBlockId = datastore_->getFirstRequiredBlock();
     testState_.nextRequiredBlock = stDelegator_->getNextRequiredBlock();
-    if (f2) f2();
+    if (callAtEnd) callAtEnd();
   }
 }
 
@@ -1281,7 +1282,7 @@ TEST_P(BcStTestParamFixture2, dstSourceSelectorPrimaryAwareness) {
   ASSERT_NFF(dstStartRunningAndCollecting());
   ASSERT_NFF(fakeSrcReplica_->replyAskForCheckpointSummariesMsg());
   auto ss = stDelegator_->getSourceSelector();
-  const std::function<void(void)> f2 = [&]() {
+  const std::function<void(void)> trigger_source_change = [&]() {
     std::call_once(once_flag, [&] {
       std::unique_ptr<MessageBase> msg;
       // Generate prePrepare messages to trigger source seletor to change the source to avoid primary.
@@ -1292,7 +1293,7 @@ TEST_P(BcStTestParamFixture2, dstSourceSelectorPrimaryAwareness) {
       }
     });
   };
-  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, f2));
+  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, trigger_source_change));
   const auto& sources = stDelegator_->getSourceSelector().getActualSources();
   ASSERT_EQ(sources.size(), number_of_replacements);
 
@@ -1374,13 +1375,13 @@ TEST_F(BcStTest, dstValidatePeriodicSourceReplacement) {
   ASSERT_NFF(dstStartRunningAndCollecting());
   ASSERT_NFF(fakeSrcReplica_->replyAskForCheckpointSummariesMsg());
   uint32_t batch_count{0};
-  auto const f1 = std::function<void(void)>([&]() {
+  auto const delay_periodically = std::function<void(void)>([&]() {
     if (batch_count < 2) {
       this_thread::sleep_for(milliseconds(targetConfig_.sourceReplicaReplacementTimeoutMs + 10));
     }
   });
-  auto const f2 = std::function<void(void)>([&]() { batch_count++; });
-  ASSERT_NFF(getMissingblocksStage(f1, f2));
+  auto const increase_batches = std::function<void(void)>([&]() { batch_count++; });
+  ASSERT_NFF(getMissingblocksStage(delay_periodically, increase_batches));
   const auto& actualSources_ = stDelegator_->getSourceSelector().getActualSources();
   ASSERT_EQ(actualSources_.size(), 3);
   validateSourceSelectorMetricCounters({{"total_replacements_", 3},
@@ -1400,7 +1401,7 @@ TEST_F(BcStTest, dstSendPrePrepareMsgsDuringStateTransfer) {
   ASSERT_NFF(dstStartRunningAndCollecting());
   ASSERT_NFF(fakeSrcReplica_->replyAskForCheckpointSummariesMsg());
   auto ss = stDelegator_->getSourceSelector();
-  const std::function<void(void)> f2 = [&]() {
+  const std::function<void(void)> trigger_source_change = [&]() {
     std::call_once(once_flag, [&] {
       std::unique_ptr<MessageBase> msg;
       // Generate prePrepare messages to trigger source seletor to change the source to avoid primary.
@@ -1411,7 +1412,7 @@ TEST_F(BcStTest, dstSendPrePrepareMsgsDuringStateTransfer) {
       }
     });
   };
-  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, f2));
+  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, trigger_source_change));
   const auto& sources = stDelegator_->getSourceSelector().getActualSources();
   // TBD metric counters in source selector should be used to validate changed sources to avoid primary
   ASSERT_EQ(sources.size(), 2);
@@ -1433,7 +1434,7 @@ TEST_F(BcStTest, dstPreprepareFromMultipleSourcesDuringStateTransfer) {
   ASSERT_NFF(dstStartRunningAndCollecting());
   ASSERT_NFF(fakeSrcReplica_->replyAskForCheckpointSummariesMsg());
   auto ss = stDelegator_->getSourceSelector();
-  const std::function<void(void)> f2 = [&]() {
+  const std::function<void(void)> generate_preprepare_messages = [&]() {
     std::call_once(once_flag, [&] {
       std::unique_ptr<MessageBase> msg;
       // Generate enough prePrepare messages but from more than one source so that source does not get changed
@@ -1446,7 +1447,7 @@ TEST_F(BcStTest, dstPreprepareFromMultipleSourcesDuringStateTransfer) {
       stateTransfer_->peekConsensusMessage(cmsg);
     });
   };
-  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, f2));
+  ASSERT_NFF(getMissingblocksStage(EMPTY_FUNC, generate_preprepare_messages));
   const auto& sources = stDelegator_->getSourceSelector().getActualSources();
   // TBD metric counters in source selector should be used to validate changed sources to avoid primary
   ASSERT_EQ(sources.size(), 1);
@@ -1490,8 +1491,8 @@ TEST_F(BcStTest, dstFullStateTransferWithRestarts) {
   ASSERT_NFF(fakeSrcReplica_->replyAskForCheckpointSummariesMsg());
   // Restart on 3 batches during collection
   std::set<size_t> execOnIterations{3, 5, 7};
-  const std::function<void(void)> f1 = [&]() { dstRestart(execOnIterations); };
-  ASSERT_NFF(getMissingblocksStage<void>(f1, EMPTY_FUNC));
+  const std::function<void(void)> restart_on_specific_iterations = [&]() { dstRestart(execOnIterations); };
+  ASSERT_NFF(getMissingblocksStage<void>(restart_on_specific_iterations, EMPTY_FUNC));
   ASSERT_NFF(getReservedPagesStage());
   // now validate completion
   ASSERT_TRUE(testedReplicaIf_.onTransferringCompleteCalled_);
