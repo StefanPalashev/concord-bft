@@ -1235,7 +1235,6 @@ void BcStTest::getReservedPagesStage() {
 /////////////////////////////////////////////////////////
 
 class BcStTestParamFixture1 : public BcStTest, public testing::WithParamInterface<tuple<uint32_t, uint32_t>> {};
-class BcStTestParamFixture2 : public BcStTest, public testing::WithParamInterface<tuple<bool, uint8_t>> {};
 
 // Validate a full state transfer
 // This is a parameterized test case, see BcStTestParamFixtureInput for all possible inputs
@@ -1271,6 +1270,8 @@ INSTANTIATE_TEST_CASE_P(BcStTest,
                                           BcStTestParamFixtureInput(128, 1024),
                                           BcStTestParamFixtureInput(128, 1024)), );
 
+class BcStTestParamFixture2 : public BcStTest, public testing::WithParamInterface<tuple<bool, uint8_t>> {};
+
 // Validate that the source selector's primary awareness mechanism can be toggled on and off
 TEST_P(BcStTestParamFixture2, dstSourceSelectorPrimaryAwareness) {
   auto [enable_primary_awareness, number_of_replacements] = GetParam();
@@ -1296,9 +1297,11 @@ TEST_P(BcStTestParamFixture2, dstSourceSelectorPrimaryAwareness) {
   ASSERT_EQ(sources.size(), number_of_replacements);
 
   validateSourceSelectorMetricCounters({{"total_replacements_", number_of_replacements},
+                                        {"replacement_due_to_no_source_", 1},
+                                        {"replacement_due_to_source_same_as_primary_", number_of_replacements - 1},
+                                        {"replacement_due_to_bad_data_", 0},
                                         {"replacement_due_to_periodic_change_", 0},
-                                        {"replacement_due_to_retransmission_timeout_", 0},
-                                        {"replacement_due_to_bad_data_", 0}});
+                                        {"replacement_due_to_retransmission_timeout_", 0}});
 
   ASSERT_NFF(getReservedPagesStage());
   // validate completion
