@@ -57,7 +57,8 @@ jobs:
                               -DKEEP_APOLLO_LOGS=TRUE\
                               -DRUN_APOLLO_TESTS=FALSE\
                               -DUSE_FAKE_CLOCK_IN_TIME_SERVICE=TRUE\" "\
-              && script -q -e -c "make test"
+              && script -q -e -c \
+              "make single-test TEST_NAME=\"skvbc_ro_replica_tests\|skvbc_persistence_tests\|skvbc_state_transfer_tests\|skvbc_reconfiguration\" "
         - name: Prepare artifacts
           if: failure()
           run: |
