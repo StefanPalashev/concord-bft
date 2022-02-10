@@ -20,6 +20,12 @@ from util.test_base import ApolloTest
 from util import skvbc as kvbc
 from util.bft import with_trio, with_bft_network, KEY_FILE_PREFIX, skip_for_tls
 from util import eliot_logging as log
+from util import operator
+
+import concord_msgs as cmf_msgs
+import sys
+sys.path.append(os.path.abspath("../../util/pyclient"))
+import bft_client
 
 def start_replica_cmd(builddir, replica_id):
     """
@@ -186,3 +192,84 @@ class SkvbcStateTransferTest(ApolloTest):
         await skvbc.assert_successful_put_get()
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
+
+    @with_trio
+    @with_bft_network(start_replica_cmd, rotate_keys=True)
+    async def test_state_transfer_rvt_validity(self, bft_network,exchange_keys=True):
+        """
+        The goal of this test is to validate that all replicas have their Range validation trees (RVTs) synchronized 
+        after running the consensus for 10 checkpoints.
+        
+        1) Given a BFT network start N - 1 replicas (leaving one stale)
+        2) Send enough requests to trigger 10 checkpoints
+        3) Start the stale replica
+        4) Enter state transfer to bring back the stale node up-to-date
+        5) Wait for state transfer to be finished
+        6) Wait for the RVT root values to be in sync
+        """
+
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+
+        stale_node = random.choice(
+            bft_network.all_replicas(without={0}))
+
+        await skvbc.prime_for_state_transfer(
+            stale_nodes={stale_node},
+            checkpoints_num=10, # key-exchange changes the last executed seqnum
+            persistency_enabled=False
+        )
+
+        bft_network.start_replica(stale_node)
+        await bft_network.wait_for_state_transfer_to_start()
+        await bft_network.wait_for_state_transfer_to_stop(0, stale_node)
+        await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
+
+    @with_trio
+    @with_bft_network(start_replica_cmd, rotate_keys=True)
+    async def test_state_transfer_rvt_validity_after_pruning(self, bft_network, exchange_keys=True):
+        """
+        The goal of this test is to validate that all replicas have their Range validation trees (RVTs) synchronized 
+        after running the consensus for 10 checkpoints and then pruning.
+        
+        1) Given a BFT network start N - 1 replicas (leaving one stale)
+        2) Send enough requests to trigger 10 checkpoints
+        3) Start the stale replica
+        4) Enter state transfer to bring back the stale node up-to-date
+        5) Wait for state transfer to be finished
+        6) Wait for the RVT root values to be in sync
+        7) Prune
+        8) Wait for the RVT root values to be in sync
+        """
+
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+
+        stale_node = random.choice(
+            bft_network.all_replicas(without={0}))
+
+        await skvbc.prime_for_state_transfer(
+            stale_nodes={stale_node},
+            checkpoints_num=10, # key-exchange changes the last executed seqnum
+            persistency_enabled=False
+        )
+
+        bft_network.start_replica(stale_node)
+        await bft_network.wait_for_state_transfer_to_start()
+        await bft_network.wait_for_state_transfer_to_stop(0, stale_node)
+        # Wait for the root values to be in sync before the pruning
+        await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
+
+        # Get the minimal latest pruneable block among all replicas
+        client = bft_network.random_client()
+        op = operator.Operator(bft_network.config, client, bft_network.builddir)
+        
+        await op.latest_pruneable_block()
+
+        latest_pruneable_blocks = []
+        rsi_rep = client.get_rsi_replies()
+        for r in rsi_rep.values():
+            lpab = cmf_msgs.ReconfigurationResponse.deserialize(r)[0]
+            latest_pruneable_blocks += [lpab.response]
+
+        await op.prune(latest_pruneable_blocks)
+        # Validate that the root values are in sync after the pruning has finished
+        await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
