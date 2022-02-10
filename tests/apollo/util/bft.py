@@ -1256,6 +1256,46 @@ class BftTestNetwork:
                                     action.add_success_fields(n=n, expected_seq_num=expected_seq_num)
                                     return
 
+    async def wait_for_replicas_rvt_root_values_to_be_in_sync(self, replica_ids):
+        """
+        Wait for the root values of the Range validation trees of all replicas to be in sync within 30 seconds.
+
+        Wait for each replica in `replicas_ids` to return the current value of the root of its Range validation tree.
+        When all of the values are collected, compare them to check if they are all the same.
+        If there are discrepancies, sleep for 1 second and try retrieving the values again.
+        """
+        with log.start_action(action_type="wait_for_replicas_rvt_root_values", replica_ids=replica_ids):
+            root_values = [None] * len(replica_ids)
+            
+            with trio.fail_after(30): # seconds
+                while True:
+                    async with trio.open_nursery() as nursery:
+                        for replica_id in replica_ids:
+                            nursery.start_soon(self.wait_for_rvt_root_value, replica_id, root_values)
+                    
+                    print(root_values)
+                    # At this point all replicas' root values are collected
+                    if root_values.count(root_values[0]) == len(root_values) and len(root_values[0]) > 0:
+                        break
+                    else:
+                        await trio.sleep(1)
+
+    async def wait_for_rvt_root_value(self, replica_id, root_values):
+        """
+        Wait for a single replica to return the current value of the root of its Range validation tree.
+        Check every .5 seconds and fail after 30 seconds.
+        """
+        with log.start_action(action_type="wait_for_rvt_root_value", replica=replica_id) as action:            
+            async def rvt_root_value_to_be_returned():
+                key = ['bc_state_transfer', 'Statuses', 'current_rvb_data_state']
+                rvb_data_state = await self.retrieve_metric(replica_id, *key)
+                if (rvb_data_state is not None):
+                    action.log(f"Replica {replica_id}'s current rvb_data_state is: \"{rvb_data_state}\".")                   
+                    root_values[replica_id] = rvb_data_state
+                    return rvb_data_state
+        
+        return await self.wait_for(rvt_root_value_to_be_returned, 30, .5)        
+
     async def wait_for_replicas_to_checkpoint(self, replica_ids, expected_checkpoint_num=None):
         """
         Wait for every replica in `replicas` to take a checkpoint.
