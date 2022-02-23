@@ -21,6 +21,7 @@ from util import skvbc as kvbc
 from util.bft import with_trio, with_bft_network, KEY_FILE_PREFIX, skip_for_tls
 from util import eliot_logging as log
 from util import operator
+from util.test_base import ApolloTest
 
 import concord_msgs as cmf_msgs
 import sys
@@ -43,7 +44,8 @@ def start_replica_cmd(builddir, replica_id):
             "-s", statusTimerMilli,
             "-v", viewChangeTimeoutMilli,
             "-e", str(True),
-            "-f", '1'
+            "-f", '1',
+            "-o", builddir + "/operator_pub.pem"
             ]
 
 
@@ -68,7 +70,7 @@ class SkvbcStateTransferTest(ApolloTest):
 
         await skvbc.prime_for_state_transfer(
             stale_nodes={stale_node},
-            checkpoints_num=3, # key-exchange channges the last executed seqnum
+            checkpoints_num=3, # key-exchange changes the last executed seqnum
             persistency_enabled=False
         )
         bft_network.start_replica(stale_node)
@@ -79,6 +81,7 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
 
+    @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer_with_multiple_clients(self, bft_network,exchange_keys=True):
         """
@@ -113,15 +116,15 @@ class SkvbcStateTransferTest(ApolloTest):
                     rotate_keys=True)
     async def test_state_transfer_with_internal_cycle(self, bft_network, exchange_keys=True):
         """
-        state transfer starts and destination replica(fetcher) is 
-        blocked during getMissingBlocks state, a bunch of data is added 
-        to the rest of the cluster  using multiple clients. Then destination 
-        replica is unblocked and state transfer resume . After one cycle 
-        of state transfer is done replica goes into antoher internal(
-        from getReserved page state to getCheckpointSummary State) 
+        state transfer starts and destination replica(fetcher) is
+        blocked during getMissingBlocks state, a bunch of data is added
+        to the rest of the cluster  using multiple clients. Then destination
+        replica is unblocked and state transfer resume . After one cycle
+        of state transfer is done replica goes into another internal(
+        from getReserved page state to getCheckpointSummary State)
         cycle to fetch remaining blocks which were added during first cycle.
         """
-        
+
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
         stale_node = random.choice(
             bft_network.all_replicas(without={0}))
@@ -131,7 +134,7 @@ class SkvbcStateTransferTest(ApolloTest):
             write_run_duration=30,
             persistency_enabled=False
         )
-        
+
         with ntc.NetworkTrafficControl() as tc:
             #delay added to loopback interface to capture the stale replica in GettingMissingBlocks state
             tc.put_loop_back_interface_delay(200)
@@ -169,7 +172,7 @@ class SkvbcStateTransferTest(ApolloTest):
 
         await skvbc.prime_for_state_transfer(
             stale_nodes={stale_node},
-            checkpoints_num=3, # key-exchange channges the last executed seqnum
+            checkpoints_num=3, # key-exchange changes the last executed seqnum
             persistency_enabled=False
         )
         bft_network.start_replica(stale_node)
@@ -225,12 +228,12 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
 
     @with_trio
-    @with_bft_network(start_replica_cmd, rotate_keys=True)
-    async def test_state_transfer_rvt_validity_after_pruning(self, bft_network, exchange_keys=True):
+    @with_bft_network(start_replica_cmd)
+    async def test_state_transfer_rvt_validity_after_pruning(self, bft_network):
         """
-        The goal of this test is to validate that all replicas have their Range validation trees (RVTs) synchronized 
-        after running the consensus for 10 checkpoints and then pruning.
-        
+        The goal of this test is to validate that all replicas have their Range validation trees (RVTs) synchronized
+        after running the consensus and then pruning.
+
         1) Given a BFT network start N - 1 replicas (leaving one stale)
         2) Send enough requests to trigger 10 checkpoints
         3) Start the stale replica
@@ -238,13 +241,14 @@ class SkvbcStateTransferTest(ApolloTest):
         5) Wait for state transfer to be finished
         6) Wait for the RVT root values to be in sync
         7) Prune
-        8) Wait for the RVT root values to be in sync
+        8) Wait for two more checkpoints so that the RVT is updated to reflect the changes after the pruning
+        9) Wait for the RVT root values to be in sync
         """
 
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
 
         stale_node = random.choice(
-            bft_network.all_replicas(without={0}))
+                    bft_network.all_replicas(without={0}))
 
         await skvbc.prime_for_state_transfer(
             stale_nodes={stale_node},
@@ -261,7 +265,7 @@ class SkvbcStateTransferTest(ApolloTest):
         # Get the minimal latest pruneable block among all replicas
         client = bft_network.random_client()
         op = operator.Operator(bft_network.config, client, bft_network.builddir)
-        
+
         await op.latest_pruneable_block()
 
         latest_pruneable_blocks = []
@@ -271,5 +275,13 @@ class SkvbcStateTransferTest(ApolloTest):
             latest_pruneable_blocks += [lpab.response]
 
         await op.prune(latest_pruneable_blocks)
+
+        # Wait for two checkpoints so that the RVT is updated to reflect the changes after the pruning
+        await skvbc.fill_and_wait_for_checkpoint(
+            bft_network.all_replicas(),
+            num_of_checkpoints_to_add=2,
+            verify_checkpoint_persistency=False,
+            assert_state_transfer_not_started=False)
+
         # Validate that the root values are in sync after the pruning has finished
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
