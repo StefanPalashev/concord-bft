@@ -6,6 +6,17 @@
 # This script assumes that the output path is empty. If not, it fails with a warning.
 set -eo pipefail
 
+# Constants
+user="vmbc"
+user_home="/home/vmbc/"
+concord_container_name="concord"
+vm_agent_config_path="/config/agent/config.json"
+concord_log_properties_path="/concord/resources/log4cplus.properties"
+concord_bft_config_path="/concord/resources/bft_config.yaml"
+minio_alias_name="min"
+minio_command_line_tool_path="/mnt/data/mc"
+####
+
 # For non self-explanatory commands, a comment above the command will explain how to use the command in more details
 usage() {
     short_dash_line="---------------\n"
@@ -15,9 +26,9 @@ usage() {
     printf "%s\n" " -c --show-concord-log-properties"
     printf "%s\n" " -m --comm-ctl <ip list,comma seperated ip list> <operation,string:down|up>"
     printf "%s\n\t%s\n" " -f --copy-from-multi <remotes source path,string> <local destination path,string> <remotes ip list,comma-seperated ip list>" \
-           "<user name,string,optional,default:root> <password,string,optional,default:Bl0ckch@!n>"
+           "<user name,string,optional,default:${user}> <password,string,optional,default:Bl0ckch@!n>"
     printf "%s\n\t%s\n" " -t --copy-to-multi <local source path,string> <remote destination path,string>" \
-           "<remotes ip list,comma-seperated ip list> <user name,string,optional,default:root> <password,string,default:Bl0ckch@!n>"
+           "<remotes ip list,comma-seperated ip list> <user name,string,optional,default:${user}> <password,string,default:Bl0ckch@!n>"
     # install packages and create profile/bashrc files to enhance the working enviorment
     printf "%s\n" " -i --install-tools"
     printf "%s\n" " -g --gen-concord-coredump-summary <output_path,string> <container_name,string>"
@@ -105,7 +116,7 @@ parser() {
         to_path=$3
         remotes_ip_list=$4
         if [[ $# -eq 4 ]] || [[ $5 == -* ]] || [ "$5" == "--*" ]; then
-            user_name="root"
+            user_name="${user}"
             password="Bl0ckch@!n"
         else
             user_name=$5
@@ -121,7 +132,7 @@ parser() {
         to_path=$3
         remotes_ip_list=$4
         if [[ $# -eq 4 ]] || [[ $5 == -* ]] || [ "$5" == "--*" ]; then
-            user_name="root"
+            user_name="${user}"
             password="Bl0ckch@!n"
         else
             user_name=$5
@@ -257,15 +268,6 @@ if [[ $# -eq 0 ]]; then
 fi
 parser "$@"
 
-# Constants
-concord_container_name="concord"
-vm_agent_config_path="/config/agent/config.json"
-concord_log_properties_path="/concord/resources/log4cplus.properties"
-concord_bft_config_path="/concord/resources/bft_config.yaml"
-minio_alias_name="min"
-minio_command_line_tool_path="/mnt/data/mc"
-####
-
 ##########################################
 # handle cmd_set_concord_log_level
 ##########################################
@@ -372,9 +374,15 @@ fi
 # handle cmd_install_tools
 ##########################################
 if $cmd_install_tools; then
-rm -rf ~/.tmux.conf ~/.profile ~/root/.mc/
 
-cat <<EOF > ~/.tmux.conf
+echo "rm -rf ${user_home}/.bashrc"
+rm -rf ${user_home}/.bashrc
+echo "rm -rf ${user_home}/.tmux.conf"
+rm -rf ${user_home}/.tmux.conf
+echo "rm -rf ${user_home}/.mc"
+rm -rf ${user_home}/.mc
+
+cat <<EOF > ${user_home}/.tmux.conf
 # Scroll History
 set-option -g history-limit 10000000
 # Set ability to capture on start and restore on exit window data when running an application
@@ -386,6 +394,7 @@ set -s escape-time 50
 set-option -g mouse on
 setw -g alternate-screen on
 EOF
+chmod 666 ${user_home}/.tmux.conf
 
 sed -i "s/^TMOUT=.*$/TMOUT=9000000/g" /etc/bash.bashrc
 sed -i "s/^readonly TMOUT$/#readonly TMOUT/g" /etc/bash.bashrc
@@ -398,30 +407,31 @@ sed -i "s/^export TMOUT$/#export TMOUT/g" /etc/profile.d/tmout.sh
 rpm -i https://packages.vmware.com/photon/3.0/photon_release_3.0_x86_64/x86_64/nano-3.0-1.ph3.x86_64.rpm || true
 rpm -i https://packages.vmware.com/photon/3.0/photon_release_3.0_x86_64/x86_64/tmux-2.7-1.ph3.x86_64.rpm || true
 
-cd /root/
+cd ${user_home}
 rm -rf ./lnav-0.10.1 ./lnav-0.10.1-musl-64bit.zip
 wget https://github.com/tstack/lnav/releases/download/v0.10.1/lnav-0.10.1-musl-64bit.zip
 unzip lnav-0.10.1-musl-64bit.zip
 mv lnav-0.10.1/lnav /usr/bin/
 rm -rf ./lnav-0.10.1 ./lnav-0.10.1-musl-64bit.zip
 
-cat <<EOF >> ~/.profile
+cat <<EOF >> ${user_home}/.bashrc
 alias ll="ls -la"
 alias cd_grep_log_full="docker logs concord | grep -ia"
 alias cd_grep_log_tail="docker logs concord --tail 10 -f | grep -ia"
 alias cd_login="docker exec -it concord /bin/bash"
 alias cd_logs_zip="docker logs concord | zip -9 log.zip -"
+alias stctl="sudo st-ctl.sh"
 
 myip() {
-  echo $(ifconfig | grep  -m 1 -Eo '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d ":" -f 2 | cut -d " " -f 1 | grep -v 255)
+  sudo echo $(ifconfig | grep  -m 1 -Eo '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d ":" -f 2 | cut -d " " -f 1 | grep -v 255)
 }
 
 _myid() {
-  echo $(ls /config/concord/config-generated/ 2> /dev/null | cut -d "." -f 2)
+  sudo echo $(ls /config/concord/config-generated/ 2> /dev/null | cut -d "." -f 2)
 }
 
 my_id() {
-  if [ "$(docker ps -a | grep concord | wc -l)" -eq "0" ]; then
+  if [ '$(docker ps -a | grep -w concord | wc -l)' -eq '0' ]; then
     local id="ledger"
   else
     local id=\$(_myid)
@@ -440,36 +450,35 @@ my_id() {
   echo "\${id}"
 }
 
-export PATH="$PATH:/root"
+export PATH="$PATH:${user_home}"
 
 PS1='\[\e[0;31m\][\$(my_id || "")][ip_\$(myip)][\w]\n\[\e[m\]> '
 export PS1
 shopt -s checkwinsize
-if [ ! -e "/logs" ] || [ ! -e "/mnt/data/logs/" ]; then
-  mkdir -p /mnt/data/logs/
-  rm /logs
-  ln -s /mnt/data/logs/ /logs
+if [ ! -e "/mnt/data/logs/" ]; then
+  sudo mkdir -p /mnt/data/logs/
+  sudo chown vmbc:docker /mnt/data/logs/
 fi
 
-if [ ! -e "/coredump_logs" ] || [ ! -e "/mnt/data/coredump_logs/" ]; then
-  mkdir -p /mnt/data/coredump_logs/
-  rm /logs
-  ln -s /mnt/data/coredump_logs/ /coredump_logs
+if [ ! -e "/mnt/data/coredump_logs/" ]; then
+  sudo mkdir -p /mnt/data/coredump_logs/
+  sudo chown vmbc:docker /mnt/data/coredump_logs/
 fi
 
-if [ ! -e "/keep" ] || [ ! -e "/mnt/data/keep/" ]; then
-  mkdir -p /mnt/data/keep/
-  rm /keep
-  ln -s /mnt/data/keep/ /keep
+if [ ! -e "/mnt/data/keep/" ]; then
+  sudo mkdir -p /mnt/data/keep/
+  sudo chown vmbc:docker /mnt/data/keep/
 fi
 cd /mnt/data/
 
 EOF
 
+chmod 666 ${user_home}/.bashrc
+
 # inside concord container
 docker exec -it ${concord_container_name} bash -c "apt update && apt install nano -y"  >/dev/null 2>&1 || true
 
-. ~/.profile
+source ${user_home}/.bashrc
 
 # install minio command line tool 'mc' in RO replica
 if [[ "$(my_id)" == *"id_ro"* ]]; then
@@ -500,9 +509,11 @@ if $cmd_gen_concord_coredump_summary; then
     output_file="${output_path}/cores_summary_${myip}.log"
     rm -f "${output_file}" || true 2> /dev/null
     mkdir -p ${output_path}
+    sudo chown vmbc:docker ${output_path}
     echo "Generating output file (this may take some time) ..."
     docker exec -it "${container_name}" bash -c \
         'for filename in /concord/cores/core.concord*; do echo "***bt for ${filename}:***"; echo "set pagination off" > ~/.gdbinit; gdb concord ${filename} -ex bt -ex quit; done' >> "${output_file}"
+    sudo chown vmbc:docker "${output_file}"
     echo "Done generating summary under ${output_file}"
 fi
 
@@ -573,6 +584,7 @@ fi
 ##########################################
 if $cmd_compress_truncate_container_logs; then
     mkdir -p "${output_folder_path}"
+    sudo chown vmbc:docker "${output_folder_path}"
     for (( c=1; c <= repeat_times; c++ )); do
         if [[ ${wait_before_iteration} -gt 0 ]]; then echo "sleeping ${wait_after_iteration} seconds (before).."; sleep "${wait_before_iteration}"; fi
         raw_log_path="${output_folder_path}/${container_name}_${c}.log"
@@ -638,6 +650,7 @@ if $cmd_save_snapshot; then
   fi
 
   mkdir -p ${snapshot_path}
+  sudo chown vmbc:docker ${snapshot_path}
   echo "Created folder ${snapshot_path}..."
 
   if [ $(docker ps -a | grep concord | wc -l) -eq '1' ]; then
@@ -719,6 +732,7 @@ if $cmd_load_snapshot; then
   fi
 
   mkdir -p ${snapshot_path}
+  sudo chown vmbc:docker ${snapshot_path}
   echo "Created folder ${snapshot_path}..."
 
   if [ $(docker ps -a | grep concord | wc -l) -eq '1' ]; then
