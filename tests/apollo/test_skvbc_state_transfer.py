@@ -259,7 +259,7 @@ class SkvbcStateTransferTest(ApolloTest):
         bft_network.start_replica(stale_node)
         await bft_network.wait_for_state_transfer_to_start()
         await bft_network.wait_for_state_transfer_to_stop(0, stale_node)
-        # Wait for the root values to be in sync before the pruning
+        # Wait for the RVT root values to be in sync before the pruning
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
 
         # Get the minimal latest pruneable block among all replicas
@@ -283,5 +283,74 @@ class SkvbcStateTransferTest(ApolloTest):
             verify_checkpoint_persistency=False,
             assert_state_transfer_not_started=False)
 
-        # Validate that the root values are in sync after the pruning has finished
+        # Validate that the RVT root values are in sync after the pruning has finished
+        await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
+
+    @with_trio
+    @with_bft_network(start_replica_cmd)
+    async def test_state_transfer_rvt_root_validation_after_adding_blocks(self, bft_network):
+        """
+        The goal of this test is to validate that all replicas have their Range validation trees (RVTs) synchronized
+        after running the consensus multiple times while there are random restarts and prunings.
+
+        1) Start all replicas in a given BFT network
+        2) Loop 6 times:
+            3) Send enough requests to trigger 2 checkpoints
+            4) After the 1st iteration, do pruning at each even iteration (i.e. i % 2 == 0)
+            5) Randomly choose if a replica will be restarted. If so, select a random replica and restart it
+        6) Wait for the RVT root values to be in sync
+        """
+
+        [bft_network.start_replica(i) for i in bft_network.all_replicas()]
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+
+        client = bft_network.random_client()
+        op = operator.Operator(bft_network.config, client, bft_network.builddir)
+
+        for i in range(6):
+            print(f'Iteration {i}')
+            await skvbc.fill_and_wait_for_checkpoint(
+                bft_network.all_replicas(),
+                num_of_checkpoints_to_add=2,
+                verify_checkpoint_persistency=False,
+                assert_state_transfer_not_started=False)
+
+            if i > 0 and i % 2 == 0:
+                await op.latest_pruneable_block()
+
+                latest_pruneable_blocks = []
+                rsi_rep = client.get_rsi_replies()
+                for r in rsi_rep.values():
+                    lpab = cmf_msgs.ReconfigurationResponse.deserialize(r)[0]
+                    latest_pruneable_blocks += [lpab.response]
+                print('Pruning...')
+                await op.prune(latest_pruneable_blocks)
+
+                with trio.fail_after(seconds=30):
+                    while True:
+                        num_replies = 0
+                        await op.prune_status()
+                        rsi_rep = client.get_rsi_replies()
+                        for r in rsi_rep.values():
+                            status = cmf_msgs.ReconfigurationResponse.deserialize(r)[0]
+                            last_prune_blockid = status.response.last_pruned_block
+                            log.log_message(message_type=f"last_prune_blockid {last_prune_blockid}, status.response.sender {status.response.sender}")
+                            
+                            if status.response.in_progress is False and last_prune_blockid > 0:
+                                num_replies += 1
+                        if num_replies == bft_network.config.n:
+                            break
+                print('Done pruning.')
+        
+            restart = random.choice([0, 1])
+            if restart == 1:
+                print('Selecting a random replica to be restarted (the primary is excluded)...')
+                replica_to_restart = random.choice(bft_network.all_replicas(without={0}))
+                print(f'Replica {replica_to_restart} will be restarted.')
+                bft_network.stop_replica(replica_to_restart)
+                await trio.sleep(seconds=2)
+                bft_network.start_replica(replica_to_restart)
+                await trio.sleep(seconds=2)
+
+        # Validate that the RVT root values are in sync after all of the prunings and restarts have finished
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
