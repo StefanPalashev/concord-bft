@@ -9,6 +9,7 @@ set -eo pipefail
 # Constants
 user="vmbc"
 user_home="/home/vmbc/"
+deployment_config_path="/config/concord/config-local/deployment.config"
 concord_container_name="concord"
 vm_agent_config_path="/config/agent/config.json"
 concord_log_properties_path="/concord/resources/log4cplus.properties"
@@ -381,6 +382,11 @@ echo "rm -rf ${user_home}/.tmux.conf"
 rm -rf ${user_home}/.tmux.conf
 echo "rm -rf ${user_home}/.mc"
 rm -rf ${user_home}/.mc
+echo "rm -rf ${user_home}/.lnav"
+rm -rf ${user_home}/.lnav
+
+mkdir -p /mnt/data/cores/
+sudo chown named:docker /mnt/data/cores/
 
 cat <<EOF > ${user_home}/.tmux.conf
 # Scroll History
@@ -404,6 +410,10 @@ sed -i "s/^TMOUT=.*$/TMOUT=9000000/g" /etc/profile.d/tmout.sh
 sed -i "s/^readonly TMOUT$/#readonly TMOUT/g" /etc/profile.d/tmout.sh
 sed -i "s/^export TMOUT$/#export TMOUT/g" /etc/profile.d/tmout.sh
 
+sed -i "s/^TCPKeepAlive=.*$/TCPKeepAlive=no/g" /etc/ssh/sshd_config
+sed -i "s/^ClientAliveInterval=.*$/ClientAliveInterval=30/g" /etc/ssh/sshd_config
+sed -i "s/^ClientAliveCountMax=.*$/ClientAliveCountMax=no/g" /etc/ssh/sshd_config
+
 rpm -i https://packages.vmware.com/photon/3.0/photon_release_3.0_x86_64/x86_64/nano-3.0-1.ph3.x86_64.rpm || true
 rpm -i https://packages.vmware.com/photon/3.0/photon_release_3.0_x86_64/x86_64/tmux-2.7-1.ph3.x86_64.rpm || true
 
@@ -423,24 +433,28 @@ alias cd_logs_zip="docker logs concord | zip -9 log.zip -"
 alias stctl="sudo st-ctl.sh"
 
 myip() {
-  sudo echo $(ifconfig | grep  -m 1 -Eo '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d ":" -f 2 | cut -d " " -f 1 | grep -v 255)
+  sudo echo \$(ifconfig | grep  -m 1 -Eo '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d ":" -f 2 | cut -d " " -f 1 | grep -v 255)
 }
 
 _myid() {
-  sudo echo $(ls /config/concord/config-generated/ 2> /dev/null | cut -d "." -f 2)
+  sudo echo \$(ls /config/concord/config-generated/ | cut -d "." -f 2)
+}
+
+num_core_dumps() {
+  echo \$(ls /mnt/data/cores/ | wc -l)
 }
 
 my_id() {
-  if [ '$(docker ps -a | grep -w concord | wc -l)' -eq '0' ]; then
+  if [ "\$(docker ps -a | grep -w concord | wc -l)" -eq '0' ]; then
     local id="ledger"
   else
     local id=\$(_myid)
     if [ -z "\$id" ]; then
-      n=\$(grep -ai -A 1000000 ro_node /config/concord/config-local/deployment.config | grep -n \$(myip)  | cut -f1 -d:)
-      re='^[0-9]+$'
+      n=\$(sudo grep -ai -A 1000000 ro_node ${deployment_config_path} | grep -n \$(myip)  | cut -f1 -d:)
+      re='^[0-9]+\$'
       if [[ \$n =~ \$re ]] ; then
         n=\$((n-2))
-        n=\$(grep -ai -A 1000000 ro_node /config/concord/config-local/deployment.config  | sed -n \${n}p | cut -f2 -d ':')
+        n=\$(sudo grep -ai -A 1000000 ro_node ${deployment_config_path} | sed -n \${n}p | cut -f2 -d ':')
         id="id_ro_"\${n//[[:space:]]/}
       fi
     else
@@ -450,10 +464,9 @@ my_id() {
   echo "\${id}"
 }
 
-export PATH="$PATH:${user_home}"
+export PATH="\$PATH:${user_home}"
 
-PS1='\[\e[0;31m\][\$(my_id || "")][ip_\$(myip)][\w]\n\[\e[m\]> '
-export PS1
+export PS1='\[\e[0;31m\][\t][\$(my_id || "")][ip_\$(myip)][#cd:\$(num_core_dumps)][\w]\n\[\e[m\]> '
 shopt -s checkwinsize
 if [ ! -e "/mnt/data/logs/" ]; then
   sudo mkdir -p /mnt/data/logs/
@@ -476,7 +489,7 @@ EOF
 chmod 666 ${user_home}/.bashrc
 
 # inside concord container
-docker exec -it ${concord_container_name} bash -c "apt update && apt install nano -y"  >/dev/null 2>&1 || true
+docker exec -it ${concord_container_name} bash -c "apt update && apt install nano -y"  > /dev/null 2>&1 || true
 
 source ${user_home}/.bashrc
 
@@ -485,11 +498,12 @@ if [[ "$(my_id)" == *"id_ro"* ]]; then
   rm -rf ${minio_command_line_tool_path}*
   echo "Installing minio mc under /mnt/data/"
   wget https://dl.min.io/client/mc/release/linux-amd64/mc
-  chmod +x ${minio_command_line_tool_path}
-  ip=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-url | cut -d ":" -f 2)
-  port=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-url | cut -d ":" -f 3)
-  secret_key=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-secret-key | cut -d ' ' -f 6)
-  access_key=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-access-key| cut -d ' ' -f 6)
+  sudo chmod +x ${minio_command_line_tool_path}
+  sudo chown vmbc:docker ${minio_command_line_tool_path}
+  ip=$(cat ${deployment_config_path} | grep -m1 s3-url | cut -d ":" -f 2)
+  port=$(cat ${deployment_config_path} | grep -m1 s3-url | cut -d ":" -f 3)
+  secret_key=$(cat ${deployment_config_path} | grep -m1 s3-secret-key | cut -d ' ' -f 6)
+  access_key=$(cat ${deployment_config_path} | grep -m1 s3-access-key| cut -d ' ' -f 6)
   ip=$(echo ${ip} | xargs)
   port=$(echo ${port} | xargs)
   secret_key=$(echo ${secret_key} | xargs)
@@ -507,7 +521,7 @@ fi # if $cmd_install_tools; then
 if $cmd_gen_concord_coredump_summary; then
     myip=$(ifconfig | grep  -m 1 -Eo '10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | cut -d ":" -f 2 | cut -d " " -f 1 | grep -v 255)
     output_file="${output_path}/cores_summary_${myip}.log"
-    rm -f "${output_file}" || true 2> /dev/null
+    rm -f "${output_file}" || true > /dev/null 2>&1
     mkdir -p ${output_path}
     sudo chown vmbc:docker ${output_path}
     echo "Generating output file (this may take some time) ..."
@@ -832,10 +846,10 @@ fi
 # handle cmd_mc_reset_all_buckets
 ##########################################
 if $cmd_mc_reset_all_buckets; then
-  ip=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-url | cut -d ":" -f 2)
-  secret_key=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-secret-key | cut -d ' ' -f 6)
-  access_key=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-access-key| cut -d ' ' -f 6)
-  port=$(cat /config/concord/config-local/deployment.config | grep -m1 s3-url | cut -d ":" -f 3)
+  ip=$(cat ${deployment_config_path} | grep -m1 s3-url | cut -d ":" -f 2)
+  secret_key=$(cat ${deployment_config_path} | grep -m1 s3-secret-key | cut -d ' ' -f 6)
+  access_key=$(cat ${deployment_config_path} | grep -m1 s3-access-key| cut -d ' ' -f 6)
+  port=$(cat ${deployment_config_path} | grep -m1 s3-url | cut -d ":" -f 3)
   ip=$(echo ${ip} | xargs)
   secret_key=$(echo ${secret_key} | xargs)
   access_key=$(echo ${access_key} | xargs)
@@ -857,7 +871,7 @@ if $cmd_mc_reset_all_buckets; then
     " sleep 1; docker ps -a"
 
   # create new buckets
-  bucket_names=($(cat /config/concord/config-local/deployment.config | grep s3-bucket-name | cut -d ":" -f 2))
+  bucket_names=($(cat ${deployment_config_path} | grep s3-bucket-name | cut -d ":" -f 2))
   for bn in "${bucket_names[@]}"
   do
     bn=$(echo ${bn} | xargs)
