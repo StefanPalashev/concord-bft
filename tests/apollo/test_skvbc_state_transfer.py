@@ -301,7 +301,9 @@ class SkvbcStateTransferTest(ApolloTest):
         6) Wait for the RVT root values to be in sync
         """
 
-        [bft_network.start_replica(i) for i in bft_network.all_replicas()]
+        for i in bft_network.all_replicas():
+            bft_network.start_replica(i)
+
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
 
         client = bft_network.random_client()
@@ -347,10 +349,9 @@ class SkvbcStateTransferTest(ApolloTest):
                 print('Selecting a random replica to be restarted (the primary is excluded)...')
                 replica_to_restart = random.choice(bft_network.all_replicas(without={0}))
                 print(f'Replica {replica_to_restart} will be restarted.')
-                bft_network.stop_replica(replica_to_restart)
-                await trio.sleep(seconds=2)
+                bft_network.stop_replica(replica_to_restart, True)
                 bft_network.start_replica(replica_to_restart)
-                await trio.sleep(seconds=2)
+                await trio.sleep(seconds=1)
 
         # Validate that the RVT root values are in sync after all of the prunings and restarts have finished
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())

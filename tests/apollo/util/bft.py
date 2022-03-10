@@ -1256,22 +1256,22 @@ class BftTestNetwork:
                                     action.add_success_fields(n=n, expected_seq_num=expected_seq_num)
                                     return
 
-    async def wait_for_replicas_rvt_root_values_to_be_in_sync(self, replica_ids):
+    async def wait_for_replicas_rvt_root_values_to_be_in_sync(self, replica_ids, timeout=30):
         """
-        Wait for the root values of the Range validation trees of all replicas to be in sync within 30 seconds.
+        Wait for the root values of the Range validation trees of all replicas to be in sync within `timeout` seconds.
 
         Wait for each replica in `replicas_ids` to return the current value of the root of its Range validation tree.
         When all of the values are collected, compare them to check if they are all the same.
         If there are discrepancies, sleep for 1 second and try retrieving the values again.
         """
-        with log.start_action(action_type="wait_for_replicas_rvt_root_values", replica_ids=replica_ids):
+        with log.start_action(action_type="wait_for_replicas_rvt_root_values", replica_ids=replica_ids, timeout=timeout):
             root_values = [None] * len(replica_ids)
             
-            with trio.fail_after(30): # seconds
+            with trio.fail_after(timeout): # seconds
                 while True:
                     async with trio.open_nursery() as nursery:
                         for replica_id in replica_ids:
-                            nursery.start_soon(self.wait_for_rvt_root_value, replica_id, root_values)
+                            nursery.start_soon(self.wait_for_rvt_root_value, replica_id, root_values, timeout)
                     
                     print(root_values)
                     # At this point all replicas' root values are collected
@@ -1280,12 +1280,12 @@ class BftTestNetwork:
                     else:
                         await trio.sleep(1)
 
-    async def wait_for_rvt_root_value(self, replica_id, root_values):
+    async def wait_for_rvt_root_value(self, replica_id, root_values, timeout=30):
         """
         Wait for a single replica to return the current value of the root of its Range validation tree.
-        Check every .5 seconds and fail after 30 seconds.
+        Check every .5 seconds and fail after `timeout` seconds.
         """
-        with log.start_action(action_type="wait_for_rvt_root_value", replica=replica_id) as action:            
+        with log.start_action(action_type="wait_for_rvt_root_value", replica=replica_id, timeout=timeout) as action:            
             async def rvt_root_value_to_be_returned():
                 key = ['bc_state_transfer', 'Statuses', 'current_rvb_data_state']
                 rvb_data_state = await self.retrieve_metric(replica_id, *key)
@@ -1294,7 +1294,7 @@ class BftTestNetwork:
                     root_values[replica_id] = rvb_data_state
                     return rvb_data_state
         
-        return await self.wait_for(rvt_root_value_to_be_returned, 30, .5)        
+        return await self.wait_for(rvt_root_value_to_be_returned, timeout, .5)        
 
     async def wait_for_replicas_to_checkpoint(self, replica_ids, expected_checkpoint_num=None):
         """
