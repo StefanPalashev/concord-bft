@@ -2,6 +2,7 @@
 #include "DBDataStore.hpp"
 #include "storage/db_interface.h"
 #include "Serializable.h"
+#include "hex_tools.h"
 
 using concord::serialize::Serializable;
 
@@ -178,6 +179,8 @@ void DBDataStore::serializeCheckpoint(std::ostream& os, const CheckpointDesc& de
   Serializable::serialize(os, desc.maxBlockId);
   Serializable::serialize(os, desc.digestOfMaxBlockId.get(), DIGEST_SIZE);
   Serializable::serialize(os, desc.digestOfResPagesDescriptor.get(), DIGEST_SIZE);
+  auto serializedRvbData = concordUtils::bufferToHex(desc.rvbData.data(), desc.rvbData.size());
+  LOG_FATAL(GL, "__sss__ :" << KVLOG(desc.checkpointNum, serializedRvbData));
   Serializable::serialize(os, desc.rvbData);
 }
 void DBDataStore::deserializeCheckpoint(std::istream& is, CheckpointDesc& desc) const {
@@ -186,6 +189,8 @@ void DBDataStore::deserializeCheckpoint(std::istream& is, CheckpointDesc& desc) 
   Serializable::deserialize(is, desc.digestOfMaxBlockId.getForUpdate(), DIGEST_SIZE);
   Serializable::deserialize(is, desc.digestOfResPagesDescriptor.getForUpdate(), DIGEST_SIZE);
   Serializable::deserialize(is, desc.rvbData);
+  auto DEserializedRvbData = concordUtils::bufferToHex(desc.rvbData.data(), desc.rvbData.size());
+  LOG_FATAL(GL, "__sss__ :" << KVLOG(desc.checkpointNum, DEserializedRvbData));
 }
 void DBDataStore::setCheckpointDesc(uint64_t checkpoint, const CheckpointDesc& desc) {
   LOG_DEBUG(logger(), toString(desc));

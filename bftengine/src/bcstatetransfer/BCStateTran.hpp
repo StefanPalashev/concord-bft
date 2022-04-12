@@ -96,7 +96,8 @@ class BCStateTran : public IStateTransfer {
                              uint16_t sizeOfDigestBuffer,
                              uint64_t& outBlockId,
                              char* outStateDigest,
-                             char* outFullStateDigest) override;
+                             char* outResPagesDigest,
+                             char* outRVBDataDigest) override;
 
   static void computeDigestOfBlockImpl(const uint64_t blockNum,
                                        const char* block,

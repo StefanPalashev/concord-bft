@@ -17,11 +17,23 @@
 namespace bftEngine {
 namespace impl {
 
+char* default_rvb_digest(unsigned int rvb_data) {
+  char rvb_data_digest[DIGEST_SIZE] = {0};
+  concord::util::digest::DigestUtil::Context c;
+  c.update(reinterpret_cast<const char*>(rvb_data), sizeof(rvb_data));
+  c.writeDigest(rvb_data_digest);
+  return std::move(rvb_data_digest);
+}
+
+const char* initial_rvb_data_digest = default_rvb_digest(INITIAL_RVB_DATA);
+const char* no_rvb_data_digest = default_rvb_digest(NO_RVB_DATA);
+
 CheckpointMsg::CheckpointMsg(ReplicaId genReplica,
                              SeqNum seqNum,
                              std::uint64_t state,
                              const Digest& stateDigest,
                              const Digest& otherDigest,
+                             const Digest& rvbDataDigest,
                              bool stateIsStable,
                              const concordUtils::SpanContext& spanContext)
     : MessageBase(genReplica,
@@ -33,6 +45,7 @@ CheckpointMsg::CheckpointMsg(ReplicaId genReplica,
   b()->state = state;
   b()->stateDigest = stateDigest;
   b()->otherDigest = otherDigest;
+  b()->rvbDataDigest = rvbDataDigest;
   b()->flags = 0;
   b()->genReplicaId = genReplica;
   if (stateIsStable) b()->flags |= 0x1;
@@ -52,7 +65,7 @@ void CheckpointMsg::validate(const ReplicasInfo& repInfo) const {
 
   if (size() < sizeof(Header) + spanContextSize() || !repInfo.isIdOfReplica(senderId()) ||
       !repInfo.isIdOfReplica(idOfGeneratedReplica()) || (seqNumber() % checkpointWindowSize != 0) ||
-      (digestOfState().isZero() && otherDigest().isZero())) {
+      (digestOfState().isZero() && otherDigest().isZero() && rvbDataDigest().isZero())) {
     throw std::runtime_error(__PRETTY_FUNCTION__ + std::string(": basic validations"));
   }
 

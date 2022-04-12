@@ -599,7 +599,8 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
                                         uint16_t sizeOfDigestBuffer,
                                         uint64_t &outBlockId,
                                         char *outStateDigest,
-                                        char *outOtherDigest) {
+                                        char *outResPagesDigest,
+                                        char *outRVBDataDigest) {
   ConcordAssert(running_);
   ConcordAssertGE(sizeOfDigestBuffer, sizeof(Digest));
   ConcordAssertGT(checkpointNumber, 0);
@@ -617,11 +618,24 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
   if (s < sizeOfDigestBuffer) {
     memset(outStateDigest + s, 0, sizeOfDigestBuffer - s);
   }
-  memcpy(outOtherDigest, desc.digestOfResPagesDescriptor.get(), s);
+  memcpy(outResPagesDigest, desc.digestOfResPagesDescriptor.get(), s);
+  if (s < sizeOfDigestBuffer) {
+    memset(outResPagesDigest + s, 0, sizeOfDigestBuffer - s);
+  }
+
+  // Not initialized value
+  // move above so it is printed in the log...
+
+  DigestUtil::Context c;
+  // auto rvbDataSize = desc.rvbData.size();
+  c.update(reinterpret_cast<const char *>(desc.rvbData.data()), desc.rvbData.size());
+  // c.update(reinterpret_cast<char *>(rvbDataSize), sizeof(rvbDataSize));
+  c.writeDigest(outRVBDataDigest);
 
   if (s < sizeOfDigestBuffer) {
-    memset(outOtherDigest + s, 0, sizeOfDigestBuffer - s);
+    memset(outRVBDataDigest + s, 0, sizeOfDigestBuffer - s);
   }
+
   outBlockId = desc.maxBlockId;
 }
 
@@ -1491,6 +1505,10 @@ bool BCStateTran::onMessage(const AskForCheckpointSummariesMsg *m, uint32_t msgL
     msg->requestMsgSeqNum = m->msgSeqNum;
     std::copy(cpDesc.rvbData.begin(), cpDesc.rvbData.end(), msg->data);
 
+    const auto rvbDataBeforeCPSummary = concordUtils::bufferToHex(msg->data, cpDesc.rvbData.size());
+
+    LOG_FATAL(GL, "__ss__" << KVLOG(rvbDataBeforeCPSummary));
+
     LOG_INFO(logger_,
              "Sending CheckpointSummaryMsg: " << KVLOG(toReplicaId,
                                                        msg->checkpointNum,
@@ -1617,6 +1635,11 @@ bool BCStateTran::onMessage(const CheckpointSummaryMsg *m, uint32_t msgLen, uint
   newCheckpoint.digestOfResPagesDescriptor = cpSummaryMsg->digestOfResPagesDescriptor;
   newCheckpoint.rvbData.insert(
       newCheckpoint.rvbData.begin(), cpSummaryMsg->data, cpSummaryMsg->data + cpSummaryMsg->sizeofRvbData());
+
+  const auto newCpOnCpSummaryMsg =
+      concordUtils::bufferToHex(newCheckpoint.rvbData.data(), newCheckpoint.rvbData.size());
+
+  LOG_FATAL(GL, "__ss__" << KVLOG(newCpOnCpSummaryMsg));
 
   auto fetchingState = stateName(getFetchingState());
   {  // txn scope

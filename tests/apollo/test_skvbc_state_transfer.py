@@ -351,7 +351,7 @@ class SkvbcStateTransferTest(ApolloTest):
                             break
                 print('Done pruning.')
         
-            restart = random.choice([0, 1])
+            restart = random.choice([1, 1])
             if restart == 1:
                 print('Selecting a random replica to be restarted (the primary is excluded)...')
                 replica_to_restart = random.choice(bft_network.all_replicas(without={0}))

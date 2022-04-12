@@ -59,7 +59,8 @@ void NullStateTransfer::getDigestOfCheckpoint(uint64_t checkpointNumber,
                                               uint16_t sizeOfDigestBuffer,
                                               uint64_t& outBlockId,
                                               char* outStateDigest,
-                                              char* outFullStateDigest) {
+                                              char* outFullStateDigest,
+                                              char* outRBVDataDigest) {
   ConcordAssert(sizeOfDigestBuffer >= sizeof(Digest));
   LOG_WARN(GL, "State digest is only based on sequence number (because state transfer module has not been loaded)");
 
