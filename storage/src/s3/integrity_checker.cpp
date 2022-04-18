@@ -187,6 +187,7 @@ void IntegrityChecker::validateCheckpointDescriptor(const DescriptorOfLastStable
                     m->state(),
                     m->digestOfState(),
                     m->otherDigest(),
+                    m->rvbDataDigest(),
                     m->idOfGeneratedReplica()));
     checkpointsInfo[m->seqNumber()].addCheckpointMsg(m, m->idOfGeneratedReplica());
     if (checkpointsInfo[m->seqNumber()].isCheckpointCertificateComplete()) {

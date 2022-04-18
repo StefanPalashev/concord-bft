@@ -28,6 +28,7 @@ class CheckpointMsg : public MessageBase {
                 State state,
                 const Digest& stateDigest,
                 const Digest& fullStateDigest,
+                const Digest& rvbDataDigest,
                 bool stateIsStable,
                 const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
 
@@ -42,6 +43,8 @@ class CheckpointMsg : public MessageBase {
   Digest& digestOfState() const { return b()->stateDigest; }
 
   Digest& otherDigest() const { return b()->otherDigest; }
+
+  Digest& rvbDataDigest() const { return b()->rvbDataDigest; }
 
   uint16_t idOfGeneratedReplica() const { return b()->genReplicaId; }
 
@@ -59,8 +62,13 @@ class CheckpointMsg : public MessageBase {
 
   void setSenderId(NodeIdType id) { sender_ = id; }
   static bool equivalent(CheckpointMsg* a, CheckpointMsg* b) {
+    if (a->rvbDataDigest() != b->rvbDataDigest()) {
+      LOG_FATAL(GL, "Equivalence check has failed:" << KVLOG(a->rvbDataDigest(), b->rvbDataDigest()));
+      printCallStack();
+    }
     return (a->seqNumber() == b->seqNumber()) && (a->digestOfState() == b->digestOfState()) &&
-           (a->otherDigest() == b->otherDigest()) && (a->state() == b->state());
+           (a->otherDigest() == b->otherDigest()) && (a->rvbDataDigest() == b->rvbDataDigest()) &&
+           (a->state() == b->state());
   }
   inline size_t getHeaderLen() const { return sizeof(Header); }
 
@@ -76,11 +84,12 @@ class CheckpointMsg : public MessageBase {
     State state;
     Digest stateDigest;
     Digest otherDigest;
+    Digest rvbDataDigest;
     ReplicaId genReplicaId;  // the replica that originally generated this message
     uint8_t flags;           // followed by a signature (by genReplicaId)
   };
 #pragma pack(pop)
-  static_assert(sizeof(Header) == (6 + 8 + 8 + 8 + DIGEST_SIZE + DIGEST_SIZE + 2 + 1), "Header is 97B");
+  static_assert(sizeof(Header) == (6 + 8 + 8 + 8 + DIGEST_SIZE + DIGEST_SIZE + DIGEST_SIZE + 2 + 1), "Header is 129B");
 
   Header* b() const { return (Header*)msgBody_; }
 };

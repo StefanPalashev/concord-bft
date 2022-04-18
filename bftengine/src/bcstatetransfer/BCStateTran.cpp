@@ -599,7 +599,8 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
                                         uint16_t sizeOfDigestBuffer,
                                         uint64_t &outBlockId,
                                         char *outStateDigest,
-                                        char *outOtherDigest) {
+                                        char *outResPagesDigest,
+                                        char *outRVBDataDigest) {
   ConcordAssert(running_);
   ConcordAssertGE(sizeOfDigestBuffer, sizeof(Digest));
   ConcordAssertGT(checkpointNumber, 0);
@@ -608,8 +609,16 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
   ConcordAssert(psd_->hasCheckpointDesc(checkpointNumber));
 
   DataStore::CheckpointDesc desc = psd_->getCheckpointDesc(checkpointNumber);
+
+  // Not initialized value (if desc.rvbData.size() == 0)
+  DigestUtil::Context c;
+  auto rvbDataSize = desc.rvbData.size();
+  c.update(reinterpret_cast<const char *>(desc.rvbData.data()), desc.rvbData.size());
+  c.update(reinterpret_cast<char *>(&rvbDataSize), sizeof(rvbDataSize));
+  c.writeDigest(outRVBDataDigest);
+
   LOG_INFO(logger_,
-           KVLOG(desc.checkpointNum, desc.maxBlockId, desc.digestOfMaxBlockId, desc.digestOfResPagesDescriptor));
+           KVLOG(desc.checkpointNum, desc.maxBlockId, desc.digestOfMaxBlockId, desc.digestOfResPagesDescriptor, outRVBDataDigest));
 
   uint16_t s = std::min((uint16_t)sizeof(Digest), sizeOfDigestBuffer);
   memcpy(outStateDigest, desc.digestOfMaxBlockId.get(), s);
@@ -617,11 +626,14 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
   if (s < sizeOfDigestBuffer) {
     memset(outStateDigest + s, 0, sizeOfDigestBuffer - s);
   }
-  memcpy(outOtherDigest, desc.digestOfResPagesDescriptor.get(), s);
-
+  memcpy(outResPagesDigest, desc.digestOfResPagesDescriptor.get(), s);
   if (s < sizeOfDigestBuffer) {
-    memset(outOtherDigest + s, 0, sizeOfDigestBuffer - s);
+    memset(outResPagesDigest + s, 0, sizeOfDigestBuffer - s);
   }
+  if (s < sizeOfDigestBuffer) {
+    memset(outRVBDataDigest + s, 0, sizeOfDigestBuffer - s);
+  }
+
   outBlockId = desc.maxBlockId;
 }
 

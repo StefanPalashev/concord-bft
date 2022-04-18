@@ -2279,6 +2279,7 @@ void ReplicaImp::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
   const CheckpointMsg::State msgState = msg->state();
   const Digest stateDigest = msg->digestOfState();
   const Digest otherDigest = msg->otherDigest();
+  const Digest rvbDataDigest = msg->rvbDataDigest();
   const bool msgIsStable = msg->isStableState();
   SCOPED_MDC_SEQ_NUM(std::to_string(msgSeqNum));
   LOG_INFO(GL,
@@ -2290,7 +2291,9 @@ void ReplicaImp::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
                                                               msgIsStable,
                                                               msgState,
                                                               stateDigest,
-                                                              otherDigest));
+                                                              otherDigest,
+                                                              rvbDataDigest));
+  LOG_WARN(GL, KVLOG(msgSenderId, msgGenReplicaId, msgSeqNum, rvbDataDigest));
   LOG_INFO(GL, "My " << KVLOG(lastStableSeqNum, lastExecutedSeqNum, getSelfEpochNumber()));
   auto span = concordUtils::startChildSpanFromContext(msg->spanContext<std::remove_pointer<decltype(msg)>::type>(),
                                                       "bft_handle_checkpoint_msg");
@@ -2332,18 +2335,21 @@ void ReplicaImp::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
       // <= to allow repeating checkpoint message since state transfer may not kick in when we are inside active
       // window
       if (pos != tableOfStableCheckpoints.end()) delete pos->second;
-      CheckpointMsg *x = new CheckpointMsg(msgGenReplicaId, msgSeqNum, msgState, stateDigest, otherDigest, msgIsStable);
+      CheckpointMsg *x =
+          new CheckpointMsg(msgGenReplicaId, msgSeqNum, msgState, stateDigest, otherDigest, rvbDataDigest, msgIsStable);
       x->setEpochNumber(msgEpochNum);
       tableOfStableCheckpoints[msgGenReplicaId] = x;
       LOG_INFO(GL,
                "Added stable Checkpoint message to tableOfStableCheckpoints: " << KVLOG(msgSenderId, msgGenReplicaId));
       for (auto &[r, cp] : tableOfStableCheckpoints) {
-        if (cp->seqNumber() == msgSeqNum && cp->otherDigest() != x->otherDigest()) {
+        if (cp->seqNumber() == msgSeqNum &&
+            (cp->otherDigest() != x->otherDigest() || cp->rvbDataDigest() != x->rvbDataDigest())) {
           metric_indicator_of_non_determinism_++;
           LOG_ERROR(GL,
                     "Detect non determinism, for checkpoint: "
-                        << msgSeqNum << " [replica: " << r << ", digest: " << cp->otherDigest() << "] Vs [replica: "
-                        << msgGenReplicaId << ", sender: " << msgSenderId << ", digest: " << x->otherDigest() << "]");
+                        << msgSeqNum << " [replica: " << r << ", digest: " << cp->otherDigest() << ", rvbDataDigest: "
+                        << cp->rvbDataDigest() << "] Vs [replica: " << msgGenReplicaId << ", sender: " << msgSenderId
+                        << ", digest: " << x->otherDigest() << ", rvbDataDigest: " << x->rvbDataDigest() << "]");
         }
       }
       if ((uint16_t)tableOfStableCheckpoints.size() >= config_.getfVal() + 1) {
@@ -3377,13 +3383,12 @@ void ReplicaImp::onTransferringCompleteImp(uint64_t newStateCheckpoint) {
   ConcordAssert(checkpointsLog->insideActiveWindow(newCheckpointSeqNum));
 
   // create and send my checkpoint
-  Digest stateDigest;
-  Digest otherDigest;
+  Digest stateDigest, otherDigest, rvbDataDigest;
   CheckpointMsg::State state;
   stateTransfer->getDigestOfCheckpoint(
-      newStateCheckpoint, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest);
-  CheckpointMsg *checkpointMsg =
-      new CheckpointMsg(config_.getreplicaId(), newCheckpointSeqNum, state, stateDigest, otherDigest, false);
+      newStateCheckpoint, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest, (char *)&rvbDataDigest);
+  CheckpointMsg *checkpointMsg = new CheckpointMsg(
+      config_.getreplicaId(), newCheckpointSeqNum, state, stateDigest, otherDigest, rvbDataDigest, false);
   checkpointMsg->sign();
   auto &checkpointInfo = checkpointsLog->get(newCheckpointSeqNum);
   checkpointInfo.addCheckpointMsg(checkpointMsg, config_.getreplicaId());
@@ -3485,14 +3490,13 @@ void ReplicaImp::onSeqNumIsStable(SeqNum newStableSeqNum, bool hasStateInformati
     CheckpointMsg *checkpointMsg = checkpointInfo.selfCheckpointMsg();
 
     if (checkpointMsg == nullptr) {
-      Digest stateDigest;
-      Digest otherDigest;
+      Digest stateDigest, otherDigest, rvbDataDigest;
       CheckpointMsg::State state;
       const uint64_t checkpointNum = lastStableSeqNum / checkpointWindowSize;
       stateTransfer->getDigestOfCheckpoint(
-          checkpointNum, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest);
-      checkpointMsg =
-          new CheckpointMsg(config_.getreplicaId(), lastStableSeqNum, state, stateDigest, otherDigest, true);
+          checkpointNum, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest, (char *)&rvbDataDigest);
+      checkpointMsg = new CheckpointMsg(
+          config_.getreplicaId(), lastStableSeqNum, state, stateDigest, otherDigest, rvbDataDigest, true);
       checkpointMsg->sign();
       checkpointInfo.addCheckpointMsg(checkpointMsg, config_.getreplicaId());
     } else {
@@ -4023,14 +4027,13 @@ void ReplicaImp::finalizePPExecution(PrePrepareMsg *ppMsg) {
     auto epoch = bftEngine::EpochManager::instance().getSelfEpochNumber();
     bftEngine::EpochManager::instance().setSelfEpochNumber(epoch);
     bftEngine::EpochManager::instance().setGlobalEpochNumber(epoch);
-    Digest stateDigest;
-    Digest otherDigest;
+    Digest stateDigest, otherDigest, rvbDataDigest;
     CheckpointMsg::State state;
     const uint64_t checkpointNum = lastExecutedSeqNum / checkpointWindowSize;
     stateTransfer->getDigestOfCheckpoint(
-        checkpointNum, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest);
-    CheckpointMsg *checkMsg =
-        new CheckpointMsg(config_.getreplicaId(), lastExecutedSeqNum, state, stateDigest, otherDigest, false);
+        checkpointNum, sizeof(Digest), state, (char *)&stateDigest, (char *)&otherDigest, (char *)&rvbDataDigest);
+    CheckpointMsg *checkMsg = new CheckpointMsg(
+        config_.getreplicaId(), lastExecutedSeqNum, state, stateDigest, otherDigest, rvbDataDigest, false);
     checkMsg->sign();
     auto &checkInfo = checkpointsLog->get(lastExecutedSeqNum);
     checkInfo.addCheckpointMsg(checkMsg, config_.getreplicaId());

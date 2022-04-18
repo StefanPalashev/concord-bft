@@ -22,6 +22,7 @@
 #include "RangeValidationTree.hpp"
 #include "RVBManager.hpp"
 #include "throughput.hpp"
+#include "hex_tools.h"
 
 using concord::util::digest::DigestUtil;
 using namespace std;
@@ -67,6 +68,9 @@ void RVBManager::init(bool fetching) {
       last_checkpoint_desc_ = desc;
     }
   }
+
+  const auto rvbDataOnInit = concordUtils::bufferToHex(desc.rvbData.data(), desc.rvbData.size());
+  LOG_FATAL(GL, KVLOG(rvbDataOnInit));
 
   // Get pruned blocks digests
   pruned_blocks_digests_ = ds_->getPrunedBlocksDigests();
@@ -250,10 +254,33 @@ void RVBManager::updateRvbDataDuringCheckpoint(CheckpointDesc& new_checkpoint_de
   addRvbDataOnBlockRange(
       add_range_min_block_id, new_checkpoint_desc.maxBlockId, new_checkpoint_desc.digestOfMaxBlockId);
 
-  //
-  //    remove blocks from RVT
-  //
-  pruneRvbDataDuringCheckpoint(new_checkpoint_desc);
+  if (new_checkpoint_desc.rvbData.empty()) {
+    LOG_FATAL(GL, "Empty RVB DATA!");
+    pruneRvbDataDuringCheckpoint(new_checkpoint_desc);
+  } else {
+    char buff[32] = {0};
+
+    DigestUtil::Context c1, c2;
+    c1.update(reinterpret_cast<const char*>(new_checkpoint_desc.rvbData.data()), new_checkpoint_desc.rvbData.size());
+    c1.writeDigest(buff);
+    Digest digest(buff);
+    LOG_FATAL(GL, "Digest on update BEFORE potential pruning: " << KVLOG(digest));
+    LOG_FATAL(GL, "Digest (buff) on update BEFORE potential pruning: " << KVLOG(buff));
+    //
+    //    remove blocks from RVT
+    //
+    pruneRvbDataDuringCheckpoint(new_checkpoint_desc);
+
+    memset(buff, 0, 32);
+    c2.update(reinterpret_cast<const char*>(new_checkpoint_desc.rvbData.data()), new_checkpoint_desc.rvbData.size());
+    c2.writeDigest(buff);
+    digest = Digest(buff);
+    LOG_FATAL(GL, "Digest on update AFTER potential pruning: " << KVLOG(digest));
+
+    const auto rvbDataOnUPDATE =
+        concordUtils::bufferToHex(new_checkpoint_desc.rvbData.data(), new_checkpoint_desc.rvbData.size());
+    LOG_FATAL(GL, KVLOG(rvbDataOnUPDATE));
+  }
 
   // Fill checkpoint and print tree
   if (!in_mem_rvt_->empty()) {
@@ -266,8 +293,14 @@ void RVBManager::updateRvbDataDuringCheckpoint(CheckpointDesc& new_checkpoint_de
       const std::string s = rvb_data.str();
       ConcordAssert(!s.empty());
       std::copy(s.c_str(), s.c_str() + s.length(), back_inserter(new_checkpoint_desc.rvbData));
+
+      const auto rvbDataRestored =
+          concordUtils::bufferToHex(new_checkpoint_desc.rvbData.data(), new_checkpoint_desc.rvbData.size());
+      LOG_FATAL(GL, KVLOG(rvbDataRestored));
+
     } else {
       new_checkpoint_desc.rvbData.clear();
+      LOG_FATAL(GL, "rvbCleared");
     }
     std::string label{"updateRvbDataDuringCheckpoint"};
     label += std::to_string(new_checkpoint_desc.checkpointNum);

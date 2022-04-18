@@ -65,7 +65,8 @@ class IStateTransfer : public IReservedPages {
                                      uint16_t sizeOfDigestBuffer,
                                      uint64_t &outBlockId,
                                      char *outStateDigest,
-                                     char *outOtherDigest) = 0;
+                                     char *outResPagesDigest,
+                                     char *outRVBDataDigest) = 0;
 
   // state
   virtual void startCollectingState() = 0;
