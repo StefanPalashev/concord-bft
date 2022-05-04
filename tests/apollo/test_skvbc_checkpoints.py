@@ -12,6 +12,7 @@
 import os.path
 import random
 import unittest
+import util.eliot_logging as log
 
 import trio
 
@@ -38,6 +39,26 @@ def start_replica_cmd(builddir, replica_id):
             "-v", viewChangeTimeoutMilli
             ]
 
+def start_replica_cmd(builddir, replica_id, corrupt_checkpoints_from_replica_ids):
+    statusTimerMilli = "500"
+    viewChangeTimeoutMilli = "10000"
+
+    path = os.path.join(builddir, "tests", "simpleKVBC", "TesterReplica", "skvbc_replica")
+    return [path,
+            "-k", KEY_FILE_PREFIX,
+            "-i", str(replica_id),
+            "-s", statusTimerMilli,
+            "-v", viewChangeTimeoutMilli,
+            "-e", str(True),
+            "-f", '1',
+            "-o", builddir + "/operator_pub.pem",
+            "--corrupt-checkpoint-messages-from-replicas", corrupt_checkpoints_from_replica_ids
+            ]
+
+def start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids):
+    def wrapper(*args, **kwargs):
+        return start_replica_cmd(*args, **kwargs, corrupt_checkpoints_from_replica_ids=corrupt_checkpoints_from_replica_ids)
+    return wrapper
 
 class SkvbcCheckpointTest(ApolloTest):
 
@@ -374,6 +395,100 @@ class SkvbcCheckpointTest(ApolloTest):
         await bft_network.wait_for_replicas_to_checkpoint(
             isolated_replicas,
             expected_checkpoint_num=lambda ecn: ecn == checkpoint_before + 1)
+ 
+    @with_trio
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1'), selected_configs=lambda n, f, c: n == 7)
+    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_non_primary(self, bft_network):     
+        await self.test_checkpointing_with_corruptions(bft_network, { 1 })
+
+    @with_trio
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1,2'), selected_configs=lambda n, f, c: n == 7 and f == 2)
+    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_f_replicas(self, bft_network):
+        await self.test_checkpointing_with_corruptions(bft_network, { 1, 2 })
+
+    @with_trio
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1,2,3'), selected_configs=lambda n, f, c: n == 7 and f == 2)
+    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_f_plus_one_replicas(self, bft_network):
+        """
+        This test verifies that the replicas in `bft_network` will not reach a consensus on a given checkpoint 
+        when there are more than F replicas that send byzantine data in their checkpoint messages.
+
+        1) Start all replicas in the given `bft_network`
+        2) Make sure that there are enough byzantine replicas
+        3) Try to send enough requests to trigger 2 checkpoints.
+        """
+        bft_network.start_all_replicas()
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+
+        byzantine_replicas = { 1, 2, 3 }
+        assert len(byzantine_replicas) == bft_network.config.f + 1, "The byzantine replicas should be F + 1."
+
+        with log.start_action(action_type='Expected_failure_when_filling_and_waiting_for_checkpoint'):
+            with self.assertRaises(trio.TooSlowError):
+                  await skvbc.fill_and_wait_for_checkpoint(
+                    initial_nodes=bft_network.all_replicas(without=byzantine_replicas),
+                    num_of_checkpoints_to_add=2,
+                    verify_checkpoint_persistency=False
+                    )
+                    
+    @with_trio
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='0'))
+    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_primary(self, bft_network):
+        """
+        This test verifies that the primary reaches the same checkpoint number as the one in the `bft_network`, 
+        even though it sends incorrect data in its checkpoint messages.
+
+        1) Start all replicas in the given `bft_network`
+        2) Get the current primary and verify the assumption that it is 0
+        3) Send enough requests to trigger 2 checkpoints
+        4) Get the current checkpoint of the primary and verify that it matches the one of the network
+        """
+        bft_network.start_all_replicas()
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+        
+        current_primary = await bft_network.get_current_primary()
+        assert current_primary == 0, "Unexpected initial primary."
+
+        await skvbc.fill_and_wait_for_checkpoint(
+            initial_nodes=bft_network.all_replicas(without={current_primary}),
+            num_of_checkpoints_to_add=2,
+            verify_checkpoint_persistency=False
+        )
+
+        checkpoint_of_current_primary = await bft_network.wait_for_checkpoint(replica_id=current_primary)
+        assert checkpoint_of_current_primary == 2
+
+    @staticmethod
+    async def test_checkpointing_with_corruptions(bft_network, byzantine_replica_ids):
+        """
+        This static method serves as a helper for tests that test byzantine behavior in checkpointing.
+        The `byzantine_replica_ids` set contains the ids of the replicas that have their checkpointing mechanism corrupted.
+        These replicas should be no more than F.
+
+        1) Start all replicas in the given `bft_network`
+        2) Send enough requests to trigger 2 checkpoints
+        3) Randomly pick one of the honest replicas
+        4) Randomly pick one of the replicas that are said to be byzantine
+        5) Check that the honest replica and the byzantine one have reached the same checkpoint
+        """
+        assert bft_network.config.f > len(byzantine_replica_ids), "The byzantine replicas should be less than F in order to use this method. "\
+            f"F = {bft_network.config.f}, provided byzantine replicas = {len(byzantine_replica_ids)}."
+
+        bft_network.start_all_replicas()
+        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
+
+        await skvbc.fill_and_wait_for_checkpoint(
+            initial_nodes=bft_network.all_replicas(without=byzantine_replica_ids),
+            num_of_checkpoints_to_add=2,
+            verify_checkpoint_persistency=False
+        )
+
+        checkpoint_of_honest_replica = await bft_network.wait_for_checkpoint(replica_id=
+            random.choice(bft_network.all_replicas(without=byzantine_replica_ids)))
+
+        checkpoint_of_corrupted_replica = await bft_network.wait_for_checkpoint(replica_id=random.choice(list(byzantine_replica_ids)))
+
+        assert checkpoint_of_honest_replica == checkpoint_of_corrupted_replica, "Detected a mismatch between the two checkpoints."
 
     @staticmethod
     async def _crash_replicas(bft_network, nb_crashing, exclude_replicas=None):
