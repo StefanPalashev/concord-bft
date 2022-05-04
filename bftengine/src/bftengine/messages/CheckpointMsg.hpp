@@ -62,10 +62,7 @@ class CheckpointMsg : public MessageBase {
 
   void setSenderId(NodeIdType id) { sender_ = id; }
   static bool equivalent(CheckpointMsg* a, CheckpointMsg* b) {
-    if (a->rvbDataDigest() != b->rvbDataDigest()) {
-      LOG_FATAL(GL, "Equivalence check has failed:" << KVLOG(a->rvbDataDigest(), b->rvbDataDigest()));
-      printCallStack();
-    }
+    // TODO: Add a log on mismatch function
     return (a->seqNumber() == b->seqNumber()) && (a->digestOfState() == b->digestOfState()) &&
            (a->otherDigest() == b->otherDigest()) && (a->rvbDataDigest() == b->rvbDataDigest()) &&
            (a->state() == b->state());

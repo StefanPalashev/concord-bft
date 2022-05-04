@@ -2293,7 +2293,6 @@ void ReplicaImp::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
                                                               stateDigest,
                                                               otherDigest,
                                                               rvbDataDigest));
-  LOG_WARN(GL, KVLOG(msgSenderId, msgGenReplicaId, msgSeqNum, rvbDataDigest));
   LOG_INFO(GL, "My " << KVLOG(lastStableSeqNum, lastExecutedSeqNum, getSelfEpochNumber()));
   auto span = concordUtils::startChildSpanFromContext(msg->spanContext<std::remove_pointer<decltype(msg)>::type>(),
                                                       "bft_handle_checkpoint_msg");

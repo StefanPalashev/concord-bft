@@ -84,6 +84,8 @@ IStateTransfer *create(const Config &config,
 
 namespace impl {
 
+static std::string default_rvb_data_digest(DIGEST_SIZE, '\0');;
+static std::once_flag calculate_once;
 //////////////////////////////////////////////////////////////////////////////
 // Ctor & Dtor
 //////////////////////////////////////////////////////////////////////////////
@@ -609,12 +611,25 @@ void BCStateTran::getDigestOfCheckpoint(uint64_t checkpointNumber,
   ConcordAssert(psd_->hasCheckpointDesc(checkpointNumber));
 
   DataStore::CheckpointDesc desc = psd_->getCheckpointDesc(checkpointNumber);
-
-  // Not initialized value (if desc.rvbData.size() == 0)
   DigestUtil::Context c;
   auto rvbDataSize = desc.rvbData.size();
-  c.update(reinterpret_cast<const char *>(desc.rvbData.data()), desc.rvbData.size());
-  c.update(reinterpret_cast<char *>(&rvbDataSize), sizeof(rvbDataSize));
+
+  if (rvbDataSize == 0) {
+    std::call_once(calculate_once, [&] {
+    const int kInitial_rvb_data = 1;
+    concord::util::digest::DigestUtil::Context ctx;
+    ctx.update(reinterpret_cast<const char*>(&kInitial_rvb_data), sizeof(kInitial_rvb_data));
+    ctx.writeDigest(&default_rvb_data_digest[0]);
+
+    LOG_INFO(GL, "CALL_ONCE" << KVLOG(default_rvb_data_digest));
+    });
+
+    c.update(default_rvb_data_digest.data(), default_rvb_data_digest.size());
+  }
+  else {
+    c.update(reinterpret_cast<const char *>(desc.rvbData.data()), desc.rvbData.size());
+    c.update(reinterpret_cast<char *>(&rvbDataSize), sizeof(rvbDataSize));
+  }
   c.writeDigest(outRVBDataDigest);
 
   LOG_INFO(logger_,
