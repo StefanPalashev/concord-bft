@@ -52,7 +52,7 @@ def start_replica_cmd(builddir, replica_id, corrupt_checkpoints_from_replica_ids
             "-e", str(True),
             "-f", '1',
             "-o", builddir + "/operator_pub.pem",
-            "--corrupt-checkpoint-messages-from-replicas", corrupt_checkpoints_from_replica_ids
+            "--corrupt-checkpoint-messages-from-replicas", ",".join(str(replica_id) for replica_id in corrupt_checkpoints_from_replica_ids)
             ]
 
 def start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids):
@@ -395,22 +395,22 @@ class SkvbcCheckpointTest(ApolloTest):
         await bft_network.wait_for_replicas_to_checkpoint(
             isolated_replicas,
             expected_checkpoint_num=lambda ecn: ecn == checkpoint_before + 1)
- 
+
     @with_trio
-    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1'), selected_configs=lambda n, f, c: n == 7)
-    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_non_primary(self, bft_network):     
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids={ 1 }), selected_configs=lambda n, f, c: n == 7)
+    async def test_checkpoint_propagation_after_corrupting_checkpointing_for_non_primary(self, bft_network):
         await self.test_checkpointing_with_corruptions(bft_network, { 1 })
 
     @with_trio
-    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1,2'), selected_configs=lambda n, f, c: n == 7 and f == 2)
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids={ 1, 2 }), selected_configs=lambda n, f, c: n == 7 and f == 2)
     async def test_checkpoint_propagation_after_corrupting_checkpointing_for_f_replicas(self, bft_network):
         await self.test_checkpointing_with_corruptions(bft_network, { 1, 2 })
 
     @with_trio
-    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='1,2,3'), selected_configs=lambda n, f, c: n == 7 and f == 2)
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids={ 1, 2, 3 }), selected_configs=lambda n, f, c: n == 7 and f == 2)
     async def test_checkpoint_propagation_after_corrupting_checkpointing_for_f_plus_one_replicas(self, bft_network):
         """
-        This test verifies that the replicas in `bft_network` will not reach a consensus on a given checkpoint 
+        This test verifies that the replicas in `bft_network` will not reach a consensus on a given checkpoint
         when there are more than F replicas that send byzantine data in their checkpoint messages.
 
         1) Start all replicas in the given `bft_network`
@@ -430,12 +430,12 @@ class SkvbcCheckpointTest(ApolloTest):
                     num_of_checkpoints_to_add=2,
                     verify_checkpoint_persistency=False
                     )
-                    
+
     @with_trio
-    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids='0'))
+    @with_bft_network(start_replica_cmd_with_corrupted_checkpointing(corrupt_checkpoints_from_replica_ids={ 0 }))
     async def test_checkpoint_propagation_after_corrupting_checkpointing_for_primary(self, bft_network):
         """
-        This test verifies that the primary reaches the same checkpoint number as the one in the `bft_network`, 
+        This test verifies that the primary reaches the same checkpoint number as the one in the `bft_network`,
         even though it sends incorrect data in its checkpoint messages.
 
         1) Start all replicas in the given `bft_network`
@@ -445,7 +445,7 @@ class SkvbcCheckpointTest(ApolloTest):
         """
         bft_network.start_all_replicas()
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
-        
+
         current_primary = await bft_network.get_current_primary()
         assert current_primary == 0, "Unexpected initial primary."
 
@@ -471,7 +471,7 @@ class SkvbcCheckpointTest(ApolloTest):
         4) Randomly pick one of the replicas that are said to be byzantine
         5) Check that the honest replica and the byzantine one have reached the same checkpoint
         """
-        assert bft_network.config.f > len(byzantine_replica_ids), "The byzantine replicas should be less than F in order to use this method. "\
+        assert bft_network.config.f >= len(byzantine_replica_ids), "The byzantine replicas should be equal to or less than F in order to use this method. "\
             f"F = {bft_network.config.f}, provided byzantine replicas = {len(byzantine_replica_ids)}."
 
         bft_network.start_all_replicas()
