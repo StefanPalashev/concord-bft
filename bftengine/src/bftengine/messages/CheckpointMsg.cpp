@@ -17,20 +17,6 @@
 namespace bftEngine {
 namespace impl {
 
-#define INITIAL_RVB_DATA 1
-#define NO_RVB_DATA      2
-
-std::string default_rvb_digest(unsigned int rvb_data) {
-  std::string rvb_data_digest(DIGEST_SIZE, '\0');
-  concord::util::digest::DigestUtil::Context c;
-  c.update(reinterpret_cast<const char*>(&rvb_data), sizeof(rvb_data));
-  c.writeDigest(&rvb_data_digest[0]);  
-  return rvb_data_digest;
-}
-
-const char* initial_rvb_data_digest = default_rvb_digest(INITIAL_RVB_DATA).c_str();
-const char* no_rvb_data_digest = default_rvb_digest(NO_RVB_DATA).c_str();
-
 CheckpointMsg::CheckpointMsg(ReplicaId genReplica,
                              SeqNum seqNum,
                              std::uint64_t state,
