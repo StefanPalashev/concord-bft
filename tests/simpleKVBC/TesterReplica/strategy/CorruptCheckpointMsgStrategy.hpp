@@ -16,8 +16,8 @@
 #include "Logger.hpp"
 #include "TesterReplica/strategy/ByzantineStrategy.hpp"
 
-#include "messages/CheckpointMsg.hpp"
-#include "SigManager.hpp"
+//#include "messages/CheckpointMsg.hpp"
+#include "StrategyUtils.hpp"
 namespace concord::kvbc::strategy {
 
 // This strategy is used to corrupt checkpoint messages sent between replicas.
@@ -25,30 +25,31 @@ class CorruptCheckpointMsgStrategy : public IByzantineStrategy {
  public:
   static std::string strategyName() { return CLASSNAME(CorruptCheckpointMsgStrategy); }
 
-  std::string getStrategyName() override { return CLASSNAME(CorruptCheckpointMsgStrategy); }
-  uint16_t getMessageCode() override { return static_cast<uint16_t>(MsgCode::Checkpoint); }
-  bool changeMessage(std::shared_ptr<bftEngine::impl::MessageBase>& msg) override {
-    CheckpointMsg& checkpoint_message = static_cast<CheckpointMsg&>(*(msg.get()));
-    LOG_INFO(logger_, KVLOG(replicas_to_corrupt_.size(), checkpoint_message.senderId()));
+  std::string getStrategyName() override;// { return CLASSNAME(CorruptCheckpointMsgStrategy); }
+  uint16_t getMessageCode() override;// { return static_cast<uint16_t>(MsgCode::Checkpoint); }
+  bool changeMessage(std::shared_ptr<bftEngine::impl::MessageBase>& msg) override;
+  // {
+  //   CheckpointMsg& checkpoint_message = static_cast<CheckpointMsg&>(*(msg.get()));
+  //   LOG_INFO(logger_, KVLOG(replicas_to_corrupt_.size(), checkpoint_message.senderId()));
 
-    if (replicas_to_corrupt_.count(checkpoint_message.senderId())) {
-      Digest& current_rvb_data_digest = checkpoint_message.rvbDataDigest();
-      std::string rvb_data_digest_string = std::string(current_rvb_data_digest.getForUpdate());
-      // Modify the 1st byte for now
-      LOG_INFO(logger_, "Before changing:" << KVLOG(current_rvb_data_digest, rvb_data_digest_string));
-      rvb_data_digest_string[0]++;
-      current_rvb_data_digest = Digest(const_cast<char*>(rvb_data_digest_string.data()), rvb_data_digest_string.size());
-      LOG_INFO(logger_, "After changing:" << KVLOG(current_rvb_data_digest, rvb_data_digest_string));
+  //   if (replicas_to_corrupt_.count(checkpoint_message.senderId())) {
+  //     Digest& current_rvb_data_digest = checkpoint_message.rvbDataDigest();
+  //     std::string rvb_data_digest_string = std::string(current_rvb_data_digest.getForUpdate());
+  //     // Modify the 1st byte for now
+  //     LOG_INFO(logger_, "Before changing:" << KVLOG(current_rvb_data_digest, rvb_data_digest_string));
+  //     rvb_data_digest_string[0]++;
+  //     current_rvb_data_digest = Digest(const_cast<char*>(rvb_data_digest_string.data()), rvb_data_digest_string.size());
+  //     LOG_INFO(logger_, "After changing:" << KVLOG(current_rvb_data_digest, rvb_data_digest_string));
 
-      auto sigManager = SigManager::instance();
-      sigManager->sign(checkpoint_message.body(),
-                       sizeOfHeader<CheckpointMsg>(),
-                       checkpoint_message.body() + sizeOfHeader<CheckpointMsg>() + checkpoint_message.spanContextSize(),
-                       sigManager->getMySigLength());
-      return true;
-    }
-    return false;
-  }
+  //     auto sigManager = SigManager::instance();
+  //     sigManager->sign(checkpoint_message.body(),
+  //                      sizeOfHeader<CheckpointMsg>(),
+  //                      checkpoint_message.body() + sizeOfHeader<CheckpointMsg>() + checkpoint_message.spanContextSize(),
+  //                      sigManager->getMySigLength());
+  //     return true;
+  //   }
+  //   return false;
+  // }
   explicit CorruptCheckpointMsgStrategy(logging::Logger& logger,
                                         const std::unordered_set<ReplicaId>& replicas_to_corrupt)
       : logger_(logger), replicas_to_corrupt_(replicas_to_corrupt) {}
