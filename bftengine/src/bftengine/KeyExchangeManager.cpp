@@ -285,6 +285,14 @@ void KeyExchangeManager::onPublishClientsKeys(const std::string& keys, std::opti
   LOG_INFO(KEY_EX_LOG, "");
   auto save = true;
   if (bootstrap_keys) {
+    LOG_FATAL(GL, "Bootstrap_keys are provided " << KVLOG(*bootstrap_keys));
+  } else {
+    LOG_FATAL(GL, "Bootstrap_keys were NOT provided");
+  }
+
+  LOG_FATAL(GL, (clientKeysPublished() ? "Client keys were published" : "Client keys were NOT published"));
+
+  if (bootstrap_keys) {
     if (keys != *bootstrap_keys) {
       LOG_FATAL(KEY_EX_LOG, "Initial Published Clients keys and replica client keys do not match");
       ConcordAssertEQ(keys, *bootstrap_keys);

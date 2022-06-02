@@ -56,6 +56,7 @@ class SkvbcStateTransferTest(ApolloTest):
 
     __test__ = False  # so that PyTest ignores this test scenario
 
+    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer(self, bft_network,exchange_keys=True):
@@ -114,6 +115,7 @@ class SkvbcStateTransferTest(ApolloTest):
         await skvbc.assert_successful_put_get()
 
     # This test should never run with TLS/TCP, only UDP
+    @unittest.skip("Temporarily disabled")
     @skip_for_tls
     @with_trio
     @with_bft_network(start_replica_cmd,
@@ -157,6 +159,7 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
 
+    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer_for_two_successive_cycles(self, bft_network,exchange_keys=True):
@@ -201,6 +204,7 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
 
+    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer_rvt_validity(self, bft_network,exchange_keys=True):
@@ -267,7 +271,7 @@ class SkvbcStateTransferTest(ApolloTest):
         # Wait for the RVT root values to be in sync before the pruning
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
 
-        # Get the minimal latest pruneable block among all replicas
+        # Get the minimal latest prunable block among all replicas
         client = bft_network.random_client()
         op = operator.Operator(bft_network.config, client, bft_network.builddir)
 
@@ -281,6 +285,23 @@ class SkvbcStateTransferTest(ApolloTest):
 
         await op.prune(latest_pruneable_blocks)
 
+        with trio.fail_after(seconds=30):
+            while True:
+                num_replies = 0
+                await op.prune_status()
+                rsi_rep = client.get_rsi_replies()
+                for r in rsi_rep.values():
+                    status = cmf_msgs.ReconfigurationResponse.deserialize(r)[0]
+                    last_prune_blockid = status.response.last_pruned_block
+                    log.log_message(message_type=f"last_prune_blockid {last_prune_blockid}, status.response.sender {status.response.sender}")
+                    
+                    if status.response.in_progress is False and last_prune_blockid > 0:
+                        num_replies += 1
+                if num_replies == bft_network.config.n:
+                    break
+                await trio.sleep(seconds=0.5)
+        print('Done pruning.')
+        
         # Wait for two checkpoints so that the RVT is updated to reflect the changes after the pruning
         await skvbc.fill_and_wait_for_checkpoint(
             bft_network.all_replicas(),
@@ -291,6 +312,7 @@ class SkvbcStateTransferTest(ApolloTest):
         # Validate that the RVT root values are in sync after the pruning has finished
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
 
+    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_state_transfer_rvt_root_validation_after_adding_blocks(self, bft_network):

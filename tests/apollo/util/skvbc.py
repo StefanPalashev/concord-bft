@@ -283,10 +283,10 @@ class SimpleKVBCProtocol:
                 val = self.random_value()
                 reply = await self.send_write_kv_set(client, [(key, val)])
                 assert reply.success
-
+            print('waiting for stable checkpoint')
             await self.bft_network.wait_for_replicas_to_collect_stable_checkpoint(
                 initial_nodes, checkpoint_before + num_of_checkpoints_to_add)
-
+            print('reached a stable checkpoint')
             await self.network_wait_for_checkpoint(
                 initial_nodes,
                 expected_checkpoint_num=lambda ecn: ecn == checkpoint_before + num_of_checkpoints_to_add,
