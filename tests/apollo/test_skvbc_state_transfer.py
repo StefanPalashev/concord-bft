@@ -56,7 +56,6 @@ class SkvbcStateTransferTest(ApolloTest):
 
     __test__ = False  # so that PyTest ignores this test scenario
 
-    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer(self, bft_network,exchange_keys=True):
@@ -115,7 +114,6 @@ class SkvbcStateTransferTest(ApolloTest):
         await skvbc.assert_successful_put_get()
 
     # This test should never run with TLS/TCP, only UDP
-    @unittest.skip("Temporarily disabled")
     @skip_for_tls
     @with_trio
     @with_bft_network(start_replica_cmd,
@@ -159,7 +157,6 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
 
-    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer_for_two_successive_cycles(self, bft_network,exchange_keys=True):
@@ -204,7 +201,6 @@ class SkvbcStateTransferTest(ApolloTest):
         await bft_network.force_quorum_including_replica(stale_node)
         await skvbc.assert_successful_put_get()
 
-    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd, rotate_keys=True)
     async def test_state_transfer_rvt_validity(self, bft_network,exchange_keys=True):
@@ -312,7 +308,6 @@ class SkvbcStateTransferTest(ApolloTest):
         # Validate that the RVT root values are in sync after the pruning has finished
         await bft_network.wait_for_replicas_rvt_root_values_to_be_in_sync(bft_network.all_replicas())
 
-    @unittest.skip("Temporarily disabled")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_state_transfer_rvt_root_validation_after_adding_blocks(self, bft_network):
